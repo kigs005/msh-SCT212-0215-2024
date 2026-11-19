@@ -9,6 +9,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <signal.h>
 
 /* Reap completed background processes */
 void reap_background(void)
@@ -67,6 +68,14 @@ int main(void)
     pid_t pid;
     int status;
     int last_status = 0;
+
+    /* Ignore Ctrl-C in the shell */
+    if (signal(SIGINT, SIG_IGN) == SIG_ERR)
+    {
+        perror("signal");
+        free(line);
+        return 1;
+    }
 
     while (1)
     {
@@ -215,6 +224,13 @@ int main(void)
         /* Child process */
         if (pid == 0)
         {
+            /* Restore default Ctrl-C behaviour in the child */
+            if (signal(SIGINT, SIG_DFL) == SIG_ERR)
+            {
+                perror("signal");
+                _exit(1);
+            }
+
             /* Handle output redirection */
             if (output_file != NULL)
             {

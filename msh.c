@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200809L
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -5,6 +7,9 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <signal.h>
 
 /* Reap completed background processes */
 void reap_background(void)
@@ -22,13 +27,11 @@ void reap_background(void)
 
             if (WIFEXITED(status))
             {
-                printf(" with status %d\n",
-                       WEXITSTATUS(status));
+                printf(" with status %d\n", WEXITSTATUS(status));
             }
             else if (WIFSIGNALED(status))
             {
-                printf(" after signal %d\n",
-                       WTERMSIG(status));
+                printf(" after signal %d\n", WTERMSIG(status));
             }
         }
         else if (pid == 0)
@@ -65,11 +68,19 @@ int main(void)
     pid_t pid;
     int status;
     int last_status = 0;
-	
+
+    /* Ignore Ctrl-C in the shell */
+    if (signal(SIGINT, SIG_IGN) == SIG_ERR)
+    {
+        perror("signal");
+        free(line);
+        return 1;
+    }
 
     while (1)
     {
         reap_background();
+
         printf("msh[%d]> ", last_status);
         fflush(stdout);
 
@@ -95,79 +106,109 @@ int main(void)
         }
 
         argv[argc] = NULL;
+
         /* Detect background execution */
-int background = 0;
+        int background = 0;
 
-if (argc > 0 && strcmp(argv[argc - 1], "&") == 0)
-{
-    background = 1;
-    argv[argc - 1] = NULL;
-    argc--;
-}
+        if (argc > 0 && strcmp(argv[argc - 1], "&") == 0)
+        {
+            background = 1;
+            argv[argc - 1] = NULL;
+            argc--;
+        }
 
-/* Ignore empty commands */
-if (argc == 0)
-{
-    continue;
-}
-        /* Ignore blank lines */
+        /* Detect output redirection */
+        char *output_file = NULL;
+
+        for (int i = 0; i < argc; i++)
+        {
+            if (strcmp(argv[i], ">") == 0)
+            {
+                if (i + 1 >= argc)
+                {
+                    fprintf(stderr, "msh: missing filename after >\n");
+                    last_status = 2;
+                    argc = 0;
+                    break;
+                }
+
+                if (i + 2 != argc)
+                {
+                    fprintf(stderr,
+                            "msh: unexpected arguments after output filename\n");
+                    last_status = 2;
+                    argc = 0;
+                    break;
+                }
+
+                output_file = argv[i + 1];
+
+                argv[i] = NULL;
+                argc = i;
+
+                break;
+            }
+        }
+
+        /* Ignore empty commands */
         if (argc == 0)
         {
             continue;
         }
-/* Built-in: help */
-if (strcmp(argv[0], "help") == 0)
-{   
-    last_status = 0;
-    printf("Available built-in commands:\n");
-    printf("  cd [dir]  - Change directory\n");
-    printf("  help      - Display this help message\n");
-    printf("  exit      - Exit the shell\n");
 
-    continue;
-}
-
-/* Built-in: exit */
-if (strcmp(argv[0], "exit") == 0)
-{
-    free(line);
-    return 0;
-}
-
-/* Built-in: cd */
-if (strcmp(argv[0], "cd") == 0)
-{
-    const char *directory;
-
-    if (argv[1] == NULL)
-    {
-        directory = getenv("HOME");
-
-        if (directory == NULL)
+        /* Built-in: help */
+        if (strcmp(argv[0], "help") == 0)
         {
-            fprintf(stderr, "cd: HOME is not set\n");
+            last_status = 0;
+
+            printf("Available built-in commands:\n");
+            printf("  cd [dir]  - Change directory\n");
+            printf("  help      - Display this help message\n");
+            printf("  exit      - Exit the shell\n");
+
             continue;
         }
-    }
-    else
-    {
-        directory = argv[1];
-    }
 
-    if (chdir(directory) == -1)
-    {
-        perror("cd");
-	last_status = 1;
-    }
-    else
-    {
-	last_status = 0;
-    }
+        /* Built-in: exit */
+        if (strcmp(argv[0], "exit") == 0)
+        {
+            free(line);
+            return 0;
+        }
 
-    continue;
-}
+        /* Built-in: cd */
+        if (strcmp(argv[0], "cd") == 0)
+        {
+            const char *directory;
 
+            if (argv[1] == NULL)
+            {
+                directory = getenv("HOME");
 
+                if (directory == NULL)
+                {
+                    fprintf(stderr, "cd: HOME is not set\n");
+                    last_status = 1;
+                    continue;
+                }
+            }
+            else
+            {
+                directory = argv[1];
+            }
+
+            if (chdir(directory) == -1)
+            {
+                perror("cd");
+                last_status = 1;
+            }
+            else
+            {
+                last_status = 0;
+            }
+
+            continue;
+        }
 
         /* Create a child process */
         pid = fork();
@@ -175,15 +216,51 @@ if (strcmp(argv[0], "cd") == 0)
         if (pid < 0)
         {
             perror("fork");
+            last_status = 1;
             continue;
         }
 
         /* Child process */
         if (pid == 0)
         {
+            /* Restore default Ctrl-C behaviour in the child */
+            if (signal(SIGINT, SIG_DFL) == SIG_ERR)
+            {
+                perror("signal");
+                _exit(1);
+            }
+
+            /* Handle output redirection */
+            if (output_file != NULL)
+            {
+                int fd = open(output_file,
+                              O_WRONLY | O_CREAT | O_TRUNC,
+                              0644);
+
+                if (fd == -1)
+                {
+                    perror("open");
+                    _exit(1);
+                }
+
+                if (dup2(fd, STDOUT_FILENO) == -1)
+                {
+                    perror("dup2");
+                    close(fd);
+                    _exit(1);
+                }
+
+                if (close(fd) == -1)
+                {
+                    perror("close");
+                    _exit(1);
+                }
+            }
+
+            /* Execute the requested program */
             execvp(argv[0], argv);
 
-            /* Reached only if execvp fails */
+            /* Handle execution failure */
             if (errno == ENOENT)
             {
                 fprintf(stderr, "%s: command not found\n", argv[0]);
@@ -194,53 +271,49 @@ if (strcmp(argv[0], "cd") == 0)
             _exit(126);
         }
 
-        
         /* Parent process */
         else
-{
-    if (background)
-    {
-        printf("[background] PID: %d\n", pid);
-
-        /* Launching a background job succeeds */
-        last_status = 0;
-    }
-    else
-    {
-        pid_t result;
-
-        do
         {
-            result = waitpid(pid, &status, 0);
+            if (background)
+            {
+                printf("[background] PID: %d\n", pid);
+                last_status = 0;
+            }
+            else
+            {
+                pid_t result;
+
+                do
+                {
+                    result = waitpid(pid, &status, 0);
+                }
+                while (result == -1 && errno == EINTR);
+
+                if (result == -1)
+                {
+                    perror("waitpid");
+                    last_status = 1;
+                    continue;
+                }
+
+                if (WIFEXITED(status))
+                {
+                    last_status = WEXITSTATUS(status);
+
+                    printf("Command exited with status: %d\n",
+                           last_status);
+                }
+                else if (WIFSIGNALED(status))
+                {
+                    last_status = 128 + WTERMSIG(status);
+
+                    printf("Command terminated by signal: %d\n",
+                           WTERMSIG(status));
+
+                    printf("Exit status: %d\n", last_status);
+                }
+            }
         }
-        while (result == -1 && errno == EINTR);
-
-        if (result == -1)
-        {
-            perror("waitpid");
-            last_status = 1;
-            continue;
-        }
-
-        if (WIFEXITED(status))
-        {
-            last_status = WEXITSTATUS(status);
-
-            printf("Command exited with status: %d\n",
-                   last_status);
-        }
-        else if (WIFSIGNALED(status))
-        {
-            last_status = 128 + WTERMSIG(status);
-
-            printf("Command terminated by signal: %d\n",
-                   WTERMSIG(status));
-
-            printf("Exit status: %d\n", last_status);
-        }
-    }
-}
-
     }
 
     free(line);

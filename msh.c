@@ -9,7 +9,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/stat.h>
-#include <signal.h>
 
 /* Reap completed background processes */
 void reap_background(void)
@@ -69,14 +68,6 @@ int main(void)
     int status;
     int last_status = 0;
 
-    /* Ignore Ctrl-C in the shell */
-    if (signal(SIGINT, SIG_IGN) == SIG_ERR)
-    {
-        perror("signal");
-        free(line);
-        return 1;
-    }
-
     while (1)
     {
         reap_background();
@@ -84,6 +75,7 @@ int main(void)
         printf("msh[%d]> ", last_status);
         fflush(stdout);
 
+        /* Read user input */
         length = getline(&line, &capacity, stdin);
 
         if (length == -1)
@@ -92,7 +84,7 @@ int main(void)
             break;
         }
 
-        /* Parse the command */
+        /* Parse command arguments */
         argc = 0;
 
         token = strtok(line, " \t\n");
@@ -223,13 +215,6 @@ int main(void)
         /* Child process */
         if (pid == 0)
         {
-            /* Restore default Ctrl-C behaviour in the child */
-            if (signal(SIGINT, SIG_DFL) == SIG_ERR)
-            {
-                perror("signal");
-                _exit(1);
-            }
-
             /* Handle output redirection */
             if (output_file != NULL)
             {

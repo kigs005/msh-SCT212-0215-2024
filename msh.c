@@ -6,6 +6,52 @@
 #include <sys/wait.h>
 #include <errno.h>
 
+/* Reap completed background processes */
+void reap_background(void)
+{
+    int status;
+    pid_t pid;
+
+    while (1)
+    {
+        pid = waitpid(-1, &status, WNOHANG);
+
+        if (pid > 0)
+        {
+            printf("\n[background] PID %d finished", pid);
+
+            if (WIFEXITED(status))
+            {
+                printf(" with status %d\n",
+                       WEXITSTATUS(status));
+            }
+            else if (WIFSIGNALED(status))
+            {
+                printf(" after signal %d\n",
+                       WTERMSIG(status));
+            }
+        }
+        else if (pid == 0)
+        {
+            break;
+        }
+        else
+        {
+            if (errno == EINTR)
+            {
+                continue;
+            }
+
+            if (errno != ECHILD)
+            {
+                perror("waitpid");
+            }
+
+            break;
+        }
+    }
+}
+
 int main(void)
 {
     char *line = NULL;
@@ -23,6 +69,7 @@ int main(void)
 
     while (1)
     {
+        reap_background();
         printf("msh[%d]> ", last_status);
         fflush(stdout);
 
@@ -48,7 +95,21 @@ int main(void)
         }
 
         argv[argc] = NULL;
+        /* Detect background execution */
+int background = 0;
 
+if (argc > 0 && strcmp(argv[argc - 1], "&") == 0)
+{
+    background = 1;
+    argv[argc - 1] = NULL;
+    argc--;
+}
+
+/* Ignore empty commands */
+if (argc == 0)
+{
+    continue;
+}
         /* Ignore blank lines */
         if (argc == 0)
         {
@@ -135,43 +196,50 @@ if (strcmp(argv[0], "cd") == 0)
 
         
         /* Parent process */
-        
-
-	else
+        else
+{
+    if (background)
     {
-    pid_t result;
+        printf("[background] PID: %d\n", pid);
 
-    do
-    {
-        result = waitpid(pid, &status, 0);
+        /* Launching a background job succeeds */
+        last_status = 0;
     }
-    while (result == -1 && errno == EINTR);
-
-    if (result == -1)
+    else
     {
-        perror("waitpid");
-        last_status = 1;
-        continue;
-    }
+        pid_t result;
 
-    if (WIFEXITED(status))
-    {
-        last_status = WEXITSTATUS(status);
+        do
+        {
+            result = waitpid(pid, &status, 0);
+        }
+        while (result == -1 && errno == EINTR);
 
-        printf("Command exited with status: %d\n",
-               last_status);
-    }
-    else if (WIFSIGNALED(status))
-    {
-        last_status = 128 + WTERMSIG(status);
+        if (result == -1)
+        {
+            perror("waitpid");
+            last_status = 1;
+            continue;
+        }
 
-        printf("Command terminated by signal: %d\n",
-               WTERMSIG(status));
+        if (WIFEXITED(status))
+        {
+            last_status = WEXITSTATUS(status);
 
-        printf("Exit status: %d\n", last_status);
+            printf("Command exited with status: %d\n",
+                   last_status);
+        }
+        else if (WIFSIGNALED(status))
+        {
+            last_status = 128 + WTERMSIG(status);
+
+            printf("Command terminated by signal: %d\n",
+                   WTERMSIG(status));
+
+            printf("Exit status: %d\n", last_status);
+        }
     }
 }
-
 
     }
 

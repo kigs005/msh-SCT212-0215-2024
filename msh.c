@@ -18,10 +18,12 @@ int main(void)
 
     pid_t pid;
     int status;
+    int last_status = 0;
+	
 
     while (1)
     {
-        printf("msh> ");
+        printf("msh[%d]> ", last_status);
         fflush(stdout);
 
         length = getline(&line, &capacity, stdin);
@@ -52,22 +54,23 @@ int main(void)
         {
             continue;
         }
- 	/* Built-in: help */
-	if (strcmp(argv[0], "help") == 0)
-	{
-   	 printf("Available built-in commands:\n");
-   	 printf("  cd [dir]  - Change directory\n");
-   	 printf("  help      - Display this help message\n");
-   	 printf("  exit      - Exit the shell\n");
+/* Built-in: help */
+if (strcmp(argv[0], "help") == 0)
+{   
+    last_status = 0;
+    printf("Available built-in commands:\n");
+    printf("  cd [dir]  - Change directory\n");
+    printf("  help      - Display this help message\n");
+    printf("  exit      - Exit the shell\n");
 
-   	 continue;
-	}
+    continue;
+}
 
-	/* Built-in: exit */
-	if (strcmp(argv[0], "exit") == 0)
-	{
-    	free(line);
-   	 return 0;
+/* Built-in: exit */
+if (strcmp(argv[0], "exit") == 0)
+{
+    free(line);
+    return 0;
 }
 
 /* Built-in: cd */
@@ -93,6 +96,11 @@ if (strcmp(argv[0], "cd") == 0)
     if (chdir(directory) == -1)
     {
         perror("cd");
+	last_status = 1;
+    }
+    else
+    {
+	last_status = 0;
     }
 
     continue;
@@ -127,33 +135,43 @@ if (strcmp(argv[0], "cd") == 0)
 
         
         /* Parent process */
-        else
-        {
-            pid_t result;
+        
 
-            do
-            {
-                result = waitpid(pid, &status, 0);
-            }
-            while (result == -1 && errno == EINTR);
+	else
+    {
+    pid_t result;
 
-            if (result == -1)
-            {
-                perror("waitpid");
-                continue;
-            }
+    do
+    {
+        result = waitpid(pid, &status, 0);
+    }
+    while (result == -1 && errno == EINTR);
 
-            if (WIFEXITED(status))
-            {
-                printf("Command exited with status: %d\n",
-                       WEXITSTATUS(status));
-            }
-            else if (WIFSIGNALED(status))
-            {
-                printf("Command terminated by signal: %d\n",
-                       WTERMSIG(status));
-            }
-        }
+    if (result == -1)
+    {
+        perror("waitpid");
+        last_status = 1;
+        continue;
+    }
+
+    if (WIFEXITED(status))
+    {
+        last_status = WEXITSTATUS(status);
+
+        printf("Command exited with status: %d\n",
+               last_status);
+    }
+    else if (WIFSIGNALED(status))
+    {
+        last_status = 128 + WTERMSIG(status);
+
+        printf("Command terminated by signal: %d\n",
+               WTERMSIG(status));
+
+        printf("Exit status: %d\n", last_status);
+    }
+}
+
 
     }
 

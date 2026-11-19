@@ -1,6 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <errno.h>
 
 int main(void)
 {
@@ -11,6 +15,9 @@ int main(void)
     char *argv[100];
     char *token;
     int argc;
+
+    pid_t pid;
+    int status;
 
     while (1)
     {
@@ -25,6 +32,7 @@ int main(void)
             break;
         }
 
+        /* Parse the command */
         argc = 0;
 
         token = strtok(line, " \t\n");
@@ -39,17 +47,67 @@ int main(void)
 
         argv[argc] = NULL;
 
+        /* Ignore blank lines */
         if (argc == 0)
         {
             continue;
         }
 
-        printf("Command: %s\n", argv[0]);
+        /* Create a child process */
+        pid = fork();
 
-        for (int i = 0; i < argc; i++)
+        if (pid < 0)
         {
-            printf("argv[%d]: %s\n", i, argv[i]);
+            perror("fork");
+            continue;
         }
+
+        /* Child process */
+        if (pid == 0)
+        {
+            execvp(argv[0], argv);
+
+            /* Reached only if execvp fails */
+            if (errno == ENOENT)
+            {
+                fprintf(stderr, "%s: command not found\n", argv[0]);
+                _exit(127);
+            }
+
+            perror("execvp");
+            _exit(126);
+        }
+
+               
+        /* Parent process */
+        else
+        {
+            pid_t result;
+
+            do
+            {
+                result = waitpid(pid, &status, 0);
+            }
+            while (result == -1 && errno == EINTR);
+
+            if (result == -1)
+            {
+                perror("waitpid");
+                continue;
+            }
+
+            if (WIFEXITED(status))
+            {
+                printf("Command exited with status: %d\n",
+                       WEXITSTATUS(status));
+            }
+            else if (WIFSIGNALED(status))
+            {
+                printf("Command terminated by signal: %d\n",
+                       WTERMSIG(status));
+            }
+        }
+
     }
 
     free(line);

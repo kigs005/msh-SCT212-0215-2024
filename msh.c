@@ -52,6 +52,53 @@ int main(void)
         {
             continue;
         }
+ 	/* Built-in: help */
+	if (strcmp(argv[0], "help") == 0)
+	{
+   	 printf("Available built-in commands:\n");
+   	 printf("  cd [dir]  - Change directory\n");
+   	 printf("  help      - Display this help message\n");
+   	 printf("  exit      - Exit the shell\n");
+
+   	 continue;
+	}
+
+	/* Built-in: exit */
+	if (strcmp(argv[0], "exit") == 0)
+	{
+    	free(line);
+   	 return 0;
+}
+
+/* Built-in: cd */
+if (strcmp(argv[0], "cd") == 0)
+{
+    const char *directory;
+
+    if (argv[1] == NULL)
+    {
+        directory = getenv("HOME");
+
+        if (directory == NULL)
+        {
+            fprintf(stderr, "cd: HOME is not set\n");
+            continue;
+        }
+    }
+    else
+    {
+        directory = argv[1];
+    }
+
+    if (chdir(directory) == -1)
+    {
+        perror("cd");
+    }
+
+    continue;
+}
+
+
 
         /* Create a child process */
         pid = fork();
@@ -78,7 +125,7 @@ int main(void)
             _exit(126);
         }
 
-               
+        
         /* Parent process */
         else
         {
